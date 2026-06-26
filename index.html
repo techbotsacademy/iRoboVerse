@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ESP32 Talking Bot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      background: #0f0f1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #e0e0f0;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 500;
+      color: #a0a0c0;
+      margin-bottom: 40px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Big emoji display */
+    #emoji-display {
+      font-size: 100px;
+      line-height: 1;
+      margin-bottom: 24px;
+      transition: transform 0.3s ease;
+      user-select: none;
+    }
+
+    #emoji-display.pulse {
+      animation: pulse 0.8s ease-in-out infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to   { transform: scale(1.12); }
+    }
+
+    /* Status label */
+    #status-label {
+      font-size: 18px;
+      font-weight: 500;
+      color: #7878aa;
+      margin-bottom: 12px;
+      min-height: 28px;
+      transition: color 0.3s;
+    }
+
+    #status-label.listening { color: #4fc3f7; }
+    #status-label.thinking  { color: #ffb74d; }
+    #status-label.speaking  { color: #81c784; }
+
+    /* Timer bar shown during recording */
+    #timer-bar-wrap {
+      width: 280px;
+      height: 6px;
+      background: #1e1e2e;
+      border-radius: 3px;
+      margin-bottom: 32px;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    #timer-bar-wrap.visible { opacity: 1; }
+
+    #timer-bar {
+      height: 100%;
+      width: 100%;
+      background: #4fc3f7;
+      border-radius: 3px;
+      transform-origin: left;
+      transform: scaleX(1);
+    }
+
+    #timer-bar.shrink {
+      transition: transform 5s linear;
+      transform: scaleX(0);
+    }
+
+    /* Main mic button */
+    #mic-btn {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: none;
+      background: #6c5ce7;
+      color: white;
+      font-size: 44px;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+      box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+
+    #mic-btn:hover:not(:disabled) {
+      background: #7d6ff0;
+      transform: scale(1.05);
+    }
+
+    #mic-btn:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    #mic-btn:disabled {
+      background: #3a3a5a;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    #mic-btn.recording {
+      background: #e53935;
+      animation: ring-pulse 1s ease-out infinite;
+    }
+
+    @keyframes ring-pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(229, 57, 53, 0.7); }
+      70%  { box-shadow: 0 0 0 20px rgba(229, 57, 53, 0);   }
+      100% { box-shadow: 0 0 0 0   rgba(229, 57, 53, 0);    }
+    }
+
+    #btn-label {
+      font-size: 13px;
+      color: #6060a0;
+      margin-bottom: 40px;
+    }
+
+    /* Answer box */
+    #answer-box {
+      width: 100%;
+      max-width: 520px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 16px;
+      padding: 20px 24px;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #answer-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: #4a4a7a;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    #answer-text {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #c0c0e0;
+      min-height: 24px;
+    }
+
+    /* Connection status dot */
+    #conn-status {
+      position: absolute;
+      top: 20px;
+      right: 24px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #5050a0;
+    }
+
+    #conn-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #444;
+    }
+
+    #conn-dot.connected    { background: #4caf50; }
+    #conn-dot.disconnected { background: #f44336; }
+  </style>
+</head>
+<body>
+
+  <!-- Server connection indicator (top right) -->
+  <div id="conn-status">
+    <div id="conn-dot"></div>
+    <span id="conn-text">Connecting...</span>
+  </div>
+
+  <h1>ESP32 Talking Bot</h1>
+
+  <!-- Big emoji showing current state -->
+  <div id="emoji-display">😴</div>
+
+  <!-- Status text -->
+  <div id="status-label">Ready</div>
+
+  <!-- Recording countdown bar -->
+  <div id="timer-bar-wrap">
+    <div id="timer-bar"></div>
+  </div>
+
+  <!-- Microphone button -->
+  <button id="mic-btn" onclick="startListening()" title="Click to ask a question">
+    🎤
+  </button>
+  <div id="btn-label">Click to speak (5 seconds)</div>
+
+  <!-- Answer display -->
+  <div id="answer-box">
+    <div id="answer-label">Answer</div>
+    <div id="answer-text">Press the button and ask any question in English.</div>
+  </div>
+
+  <script>
+    const SERVER = "http://localhost:5000";
+
+    let pollInterval = null;
+    let isRecording = false;
+
+    // --------------------------------------------------------
+    // Poll server every 800ms for status updates
+    // --------------------------------------------------------
+    function startPolling() {
+      pollInterval = setInterval(pollStatus, 800);
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch(SERVER + "/status");
+        if (!res.ok) throw new Error("Server error");
+        const data = await res.json();
+
+        // Update connection indicator
+        document.getElementById("conn-dot").className = "connected";
+        document.getElementById("conn-text").textContent = "Server connected";
+
+        updateUI(data);
+
+      } catch (err) {
+        document.getElementById("conn-dot").className = "disconnected";
+        document.getElementById("conn-text").textContent = "Server offline";
+      }
+    }
+
+    // --------------------------------------------------------
+    // Update all UI elements based on server status
+    // --------------------------------------------------------
+    function updateUI(data) {
+      const emoji   = document.getElementById("emoji-display");
+      const label   = document.getElementById("status-label");
+      const btn     = document.getElementById("mic-btn");
+      const ansText = document.getElementById("answer-text");
+
+      // Update emoji
+      emoji.textContent = data.emoji || "😴";
+
+      // Update status label and colors
+      label.className = "";
+      switch (data.status) {
+        case "LISTENING":
+          label.textContent = "Listening... speak now!";
+          label.className = "listening";
+          emoji.classList.add("pulse");
+          btn.disabled = true;
+          btn.classList.add("recording");
+          break;
+
+        case "THINKING":
+          label.textContent = "Thinking...";
+          label.className = "thinking";
+          emoji.classList.remove("pulse");
+          emoji.classList.add("pulse");
+          btn.disabled = true;
+          btn.classList.remove("recording");
+          break;
+
+        case "SPEAKING":
+          label.textContent = "Speaking answer...";
+          label.className = "speaking";
+          emoji.classList.add("pulse");
+          btn.disabled = true;
+          btn.classList.remove("recording");
+          // Show the answer text as soon as we start speaking
+          if (data.response) {
+            ansText.textContent = data.response;
+          }
+          break;
+
+        default: // IDLE
+          label.textContent = "Ready";
+          label.className = "";
+          emoji.classList.remove("pulse");
+          btn.disabled = false;
+          btn.classList.remove("recording");
+          isRecording = false;
+          hideTimerBar();
+          break;
+      }
+    }
+
+    // --------------------------------------------------------
+    // Button click - start the bot
+    // --------------------------------------------------------
+    async function startListening() {
+      if (isRecording) return;
+      isRecording = true;
+
+      // Show timer bar countdown
+      showTimerBar();
+
+      try {
+        await fetch(SERVER + "/listen", { method: "POST" });
+      } catch (err) {
+        document.getElementById("status-label").textContent = "Cannot reach server. Is server.py running?";
+        isRecording = false;
+        hideTimerBar();
+      }
+    }
+
+    // --------------------------------------------------------
+    // Timer bar animation (5 second shrink)
+    // --------------------------------------------------------
+    function showTimerBar() {
+      const wrap = document.getElementById("timer-bar-wrap");
+      const bar  = document.getElementById("timer-bar");
+
+      // Reset bar to full width
+      bar.classList.remove("shrink");
+      bar.style.transition = "none";
+      bar.style.transform  = "scaleX(1)";
+      wrap.classList.add("visible");
+
+      // Trigger shrink animation on next frame
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          bar.classList.add("shrink");
+        });
+      });
+    }
+
+    function hideTimerBar() {
+      const wrap = document.getElementById("timer-bar-wrap");
+      wrap.classList.remove("visible");
+      const bar = document.getElementById("timer-bar");
+      bar.classList.remove("shrink");
+      bar.style.transform = "scaleX(1)";
+    }
+
+    // Start polling when page loads
+    startPolling();
+  </script>
+
+</body>
+</html>
