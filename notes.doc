@@ -19,7 +19,10 @@ Step 1: Open Terminal / Command Prompt
 •	Navigate to your project folder using the cd command. For example:
 Bash
 cd C:\Users\DELL\Downloads\files (3)
-Step 2: Install Python Libraries
+Step 2: 
+On Bash
+winget install Gyan.FFmpeg
+Install Python Libraries
 Copy, paste, and run this single command in your terminal to install all required libraries:
 Bash
 pip install Flask flask-cors openai-whisper groq gTTS pygame pyserial torch torchvision torchaudio

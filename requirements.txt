@@ -1,0 +1,12 @@
+Flask>=3.0.0
+flask-cors>=6.0.0
+openai-whisper
+groq>=0.30.0
+gTTS>=2.5.4
+pygame>=2.6.1
+PyAudio>=0.2.14
+pyserial>=3.5
+torch
+torchvision
+torchaudio
+click>=8.1.0

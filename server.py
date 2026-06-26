@@ -43,7 +43,7 @@ from flask_cors import CORS
 # ============================================================
 
 # Get free key from https://console.groq.com
-GROQ_API_KEY = "API_KEY"   
+GROQ_API_KEY = "YOUR_KEY"   
 
 # UPDATED: Changed from 'llama3-8b-8192' to the currently active model
 GROQ_MODEL = "llama-3.1-8b-instant"            
