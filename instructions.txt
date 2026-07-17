@@ -1,0 +1,14 @@
+pip install fastapi uvicorn pydantic python-multipart torch TTS soundfile
+
+:: Make sure environment is active
+venv\Scripts\activate
+
+:: Force clear and install clean CPU variants
+pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+pip install "networkx>=2.5.0,<3.0.0"
+pip install "transformers<4.45.0"
+
+pip install pydub
+pip install ffmpeg-downloader
+pip install audioread librosa numpy

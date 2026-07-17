@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Clone AI Assistant</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        h1 { font-size: 1.8rem; text-align: center; margin-bottom: 25px; color: #fff; }
+        h2 { font-size: 1.2rem; margin-bottom: 15px; color: var(--primary); border-bottom: 1px solid #334155; padding-bottom: 5px; }
+
+        .section { margin-bottom: 30px; }
+
+        .button-group { display: flex; gap: 10px; margin-bottom: 15px; }
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #fff;
+        }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        
+        .btn-primary { background-color: var(--primary); }
+        .btn-primary:hover:not(:disabled) { background-color: var(--primary-hover); }
+        .btn-danger { background-color: var(--danger); }
+        .btn-success { background-color: var(--success); }
+
+        .timer { font-size: 1.1rem; font-weight: bold; text-align: center; color: var(--danger); margin-bottom: 10px; height: 24px; }
+        
+        canvas {
+            width: 100%;
+            height: 80px;
+            background: #0f172a;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .status-box {
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+            background: #334155;
+            display: none;
+        }
+
+        audio { width: 100%; margin-top: 10px; border-radius: 8px; }
+
+        .input-group { display: flex; flex-direction: column; gap: 10px; }
+        textarea {
+            width: 100%;
+            height: 80px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px;
+            color: #fff;
+            font-size: 1rem;
+            resize: none;
+        }
+        textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+        textarea:focus { border-color: var(--primary); outline: none; }
+
+        .download-container { display: flex; justify-content: flex-end; margin-top: 10px; }
+        .btn-small { padding: 6px 12px; font-size: 0.85rem; width: auto; flex: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Voice Clone AI Space</h1>
+
+    <div class="section">
+    <h2>1. Clone Your Voice (10 Seconds)</h2>
+    <div id="timer" class="timer"></div>
+    <canvas id="visualizer"></canvas>
+    <div class="button-group">
+        <button id="btn-record" class="btn-primary">Record Live</button>
+        <button id="btn-stop" class="btn-danger" disabled>Stop</button>
+    </div>
+    
+    <div style="margin-top: 15px; padding: 15px; background: #0f172a; border-radius: 8px; border: 1px dashed #3b82f6;">
+        <label for="file-upload" style="display: block; font-size: 0.9rem; margin-bottom: 8px; color: var(--text-muted);">
+            Or upload a clean, pre-recorded WAV file (No noise):
+        </label>
+        <input type="file" id="file-upload" accept=".wav" style="color: var(--text); font-size: 0.9rem;" />
+    </div>
+
+    <div id="record-status" class="status-box" style="margin-top: 15px;"></div>
+    <audio id="audio-playback" controls style="display:none; margin-top: 15px;"></audio>
+</div>
+
+    <div class="section">
+        <h2>1. Clone Your Voice (10 Seconds)</h2>
+        <div id="timer" class="timer"></div>
+        <canvas id="visualizer"></canvas>
+        <div class="button-group">
+            <button id="btn-record" class="btn-primary">Record</button>
+            <button id="btn-stop" class="btn-danger" disabled>Stop</button>
+        </div>
+        <div id="record-status" class="status-box"></div>
+        <audio id="audio-playback" controls style="display:none;"></audio>
+    </div>
+
+    <div class="section">
+        <h2>2. Ask the AI</h2>
+        <div class="input-group">
+            <textarea id="text-question" placeholder="Type a question here for the AI to read back in your voice..." disabled></textarea>
+            <button id="btn-ask" class="btn-success" disabled>Ask AI</button>
+        </div>
+        <div id="ai-status" class="status-box"></div>
+        <div id="response-container" style="display: none;">
+            <audio id="audio-response" controls></audio>
+            <div class="download-container">
+                <a id="link-download" download="ai_response.wav">
+                    <button class="btn-primary btn-small">Download Speech</button>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const BACKEND_URL = "http://127.0.0.1:8000";
+    
+    // UI Elements
+    const btnRecord = document.getElementById('btn-record');
+    const btnStop = document.getElementById('btn-stop');
+    const btnAsk = document.getElementById('btn-ask');
+    const timerEl = document.getElementById('timer');
+    const canvas = document.getElementById('visualizer');
+    const recordStatus = document.getElementById('record-status');
+    const aiStatus = document.getElementById('ai-status');
+    const audioPlayback = document.getElementById('audio-playback');
+    const textQuestion = document.getElementById('text-question');
+    const audioResponse = document.getElementById('audio-response');
+    const responseContainer = document.getElementById('response-container');
+    const linkDownload = document.getElementById('link-download');
+    
+    // Canvas context for Visualizer
+    const canvasCtx = canvas.getContext('2d');
+
+    // States
+    let timerInterval = null;
+    let audioCtx = null;
+    let analyser = null;
+    let drawVisual = null;
+
+    // Web Audio Recording States
+    let audioContext;
+    let recorderProcessor;
+    let mediaStream;
+    let leftChannel = [];
+    let recordingLength = 0;
+    let sampleRate = 44100;
+
+    // Add this to your top UI elements declarations list
+const fileUpload = document.getElementById('file-upload');
+
+// Handle Direct File Upload Action
+fileUpload.addEventListener('change', async (e) => {
+    const selectedFile = e.target.files[0];
+    if (!selectedFile) return;
+
+    // Optional Validation Check
+    if (!selectedFile.name.endsWith('.wav')) {
+        showStatus(recordStatus, "Please select a standard validation format .wav file.", true);
+        return;
+    }
+
+    // Reset playback layouts
+    audioPlayback.style.display = 'none';
+    
+    showStatus(recordStatus, "Processing and uploading your clean voice profile file...", false);
+    
+    // Package the raw file directly into the Form pipeline
+    const formData = new FormData();
+    formData.append("file", selectedFile, "speaker.wav");
+
+    try {
+        const response = await fetch(`${BACKEND_URL}/upload_voice`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (response.ok) {
+            showStatus(recordStatus, "Pristine voice profile uploaded successfully! You can now ask a question.", false);
+            
+            // Set the local preview playback source to verify the sound
+            audioPlayback.src = URL.createObjectURL(selectedFile);
+            audioPlayback.style.display = 'block';
+
+            // Unlock the inference components instantly
+            textQuestion.disabled = false;
+            btnAsk.disabled = false;
+        } else {
+            throw new Error("The backend server rejected the file layout configuration.");
+        }
+    } catch (err) {
+        console.error(err);
+        showStatus(recordStatus, `Upload failed: ${err.message}`, true);
+    }
+});
+
+    // Initialize Canvas Visualizer Styling
+    function initCanvas() {
+        canvasCtx.fillStyle = '#0f172a';
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = '#3b82f6';
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(0, canvas.height / 2);
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
+    }
+    initCanvas();
+
+    function showStatus(element, text, isError = false) {
+        element.style.display = 'block';
+        element.style.backgroundColor = isError ? '#ef444433' : '#334155';
+        element.style.color = isError ? '#fca5a5' : '#f8fafc';
+        element.innerText = text;
+    }
+
+    // Audio Visualizer Loop
+    function visualize(stream) {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function draw() {
+            drawVisual = requestAnimationFrame(draw);
+            analyser.getByteTimeDomainData(dataArray);
+
+            canvasCtx.fillStyle = '#0f172a';
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+            canvasCtx.lineWidth = 2;
+            canvasCtx.strokeStyle = '#3b82f6';
+            canvasCtx.beginPath();
+
+            const sliceWidth = canvas.width * 1.0 / bufferLength;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = v * canvas.height / 2;
+                if (i === 0) {
+                    canvasCtx.moveTo(x, y);
+                } else {
+                    canvasCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+            canvasCtx.lineTo(canvas.width, canvas.height / 2);
+            canvasCtx.stroke();
+        }
+        draw();
+    }
+
+    // 1. Handle Microphone Recording Setup
+    btnRecord.addEventListener('click', async () => {
+        leftChannel = [];
+        recordingLength = 0;
+        recordStatus.style.display = 'none';
+        audioPlayback.style.display = 'none';
+        
+        try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            sampleRate = audioContext.sampleRate;
+            const source = audioContext.createMediaStreamSource(mediaStream);
+            
+            recorderProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            recorderProcessor.onaudioprocess = (e) => {
+                const buffer = e.inputBuffer.getChannelData(0);
+                leftChannel.push(new Float32Array(buffer));
+                recordingLength += buffer.length;
+            };
+            
+            source.connect(recorderProcessor);
+            recorderProcessor.connect(audioContext.destination);
+            
+            visualize(mediaStream);
+
+            btnRecord.disabled = true;
+            btnStop.disabled = false;
+
+            let secondsLeft = 10;
+            timerEl.innerText = `Recording: ${secondsLeft}s`;
+            
+            const stopRecordingSequence = async () => {
+                clearInterval(timerInterval);
+                timerEl.innerText = "";
+                
+                if (recorderProcessor) {
+                    recorderProcessor.disconnect();
+                    source.disconnect();
+                }
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                }
+                if (audioContext) {
+                    audioContext.close();
+                }
+                
+                if (drawVisual) cancelAnimationFrame(drawVisual);
+                initCanvas();
+
+                const resultBuffer = new Float32Array(recordingLength);
+                let offset = 0;
+                for (let i = 0; i < leftChannel.length; i++) {
+                    resultBuffer.set(leftChannel[i], offset);
+                    offset += leftChannel[i].length;
+                }
+
+                const wavBuffer = createWavBuffer(resultBuffer, sampleRate);
+                const audioBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+                
+                audioPlayback.src = URL.createObjectURL(audioBlob);
+                audioPlayback.style.display = 'block';
+
+                // Route through the dedicated upload module
+                await uploadVoiceBlob(audioBlob);
+                
+                btnRecord.disabled = false;
+                btnStop.disabled = true;
+            };
+
+            btnStop.onclick = stopRecordingSequence;
+
+            timerInterval = setInterval(() => {
+                secondsLeft--;
+                if (secondsLeft <= 0) {
+                    stopRecordingSequence();
+                } else {
+                    timerEl.innerText = `Recording: ${secondsLeft}s`;
+                }
+            }, 1000);
+
+        } catch (err) {
+            console.error("Microphone access initialization failed: ", err);
+            showStatus(recordStatus, "Microphone capture access denied.", true);
+        }
+    });
+
+    // Helper function to build standard RIFF/WAV headers around raw floats
+    function createWavBuffer(samples, sampleRate) {
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+
+        const writeString = (view, offset, string) => {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        };
+
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + samples.length * 2, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); 
+        view.setUint16(22, 1, true); 
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true); 
+        writeString(view, 36, 'data');
+        view.setUint32(40, samples.length * 2, true);
+
+        let offset = 44;
+        for (let i = 0; i < samples.length; i++, offset += 2) {
+            let s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+        return buffer;
+    }
+
+    // Upload audio blob sequence
+    async function uploadVoiceBlob(audioBlob) {
+        const formData = new FormData();
+        formData.append("file", audioBlob, "speaker.wav"); 
+
+        showStatus(recordStatus, "Uploading voice profile...", false);
+
+        try {
+            const response = await fetch(`${BACKEND_URL}/upload_voice`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                showStatus(recordStatus, "Voice profile updated successfully! You can now ask a question.", false);
+                
+                // Unlock input elements dynamically
+                textQuestion.disabled = false;
+                btnAsk.disabled = false; 
+            } else {
+                throw new Error("Server rejected audio stream formatting.");
+            }
+        } catch (err) {
+            console.error(err);
+            showStatus(recordStatus, "Upload verification failed. Please try again.", true);
+        }
+    }
+
+    // Query Inference Sequence
+    btnAsk.addEventListener('click', async () => {
+        const questionText = textQuestion.value.trim();
+        if (!questionText) {
+            showStatus(aiStatus, "Please write a question before clicking 'Ask AI'.", true);
+            return;
+        }
+
+        showStatus(aiStatus, "AI is processing & synthesizing your speech... (Takes 10-20 seconds on CPU)");
+        responseContainer.style.display = 'none';
+        btnAsk.disabled = true;
+
+        try {
+            const response = await fetch(`${BACKEND_URL}/ask`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: questionText })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || "Voice synthesis pipeline failure.");
+            }
+
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+
+            audioResponse.src = audioUrl;
+            linkDownload.href = audioUrl;
+            responseContainer.style.display = 'block';
+            
+            showStatus(aiStatus, "Processing finished! Playing voice response.");
+            audioResponse.play();
+
+        } catch (err) {
+            console.error(err);
+            showStatus(aiStatus, `Inference Error: ${err.message}`, true);
+        } finally {
+            btnAsk.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
