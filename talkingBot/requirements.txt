@@ -1,0 +1,10 @@
+flask
+flask-cors
+python-dotenv
+groq
+gtts
+pygame
+requests
+sounddevice
+soundfile
+numpy
