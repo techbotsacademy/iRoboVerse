@@ -10,9 +10,9 @@
   {
     "id": 2,
     "name": "Drink water",
-    "time": "13:13",
-    "status": "pending",
-    "misses": 4,
+    "time": "13:16",
+    "status": "completed",
+    "misses": 0,
     "enabled": true,
     "alert": "Caretaker alert required: three consecutive misses."
   },
@@ -20,8 +20,8 @@
     "id": 3,
     "name": "Take a break",
     "time": "13:13",
-    "status": "pending",
-    "misses": 2,
+    "status": "completed",
+    "misses": 0,
     "enabled": true,
     "alert": null
   }
