@@ -1,0 +1,152 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Reminder Agent</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6fb;
+      color: #202638;
+      margin: 0;
+      padding: 30px;
+    }
+
+    main {
+      max-width: 760px;
+      margin: auto;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 22px;
+      margin: 16px 0;
+      box-shadow: 0 4px 20px #0000000d;
+    }
+
+    button {
+      padding: 10px 15px;
+      border: 0;
+      border-radius: 9px;
+      cursor: pointer;
+      margin: 4px;
+      background: #334ee8;
+      color: white;
+    }
+
+    .secondary {
+      background: #e8ebf5;
+      color: #202638;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>🔔 Voice Reminder Agent</h1>
+    <p>Your daily tasks, reminders, and wellbeing check-ins.</p>
+
+    <div class="card">
+      <h2>Voice reminders</h2>
+      <button onclick="enableVoice()">Enable voice</button>
+      <button class="secondary" onclick="loadTasks()">Refresh tasks</button>
+      <p id="message">Enable voice to hear a test reminder.</p>
+    </div>
+
+    <div class="card">
+      <h2>Today's tasks</h2>
+      <div id="tasks">Loading tasks...</div>
+    </div>
+
+    <div class="card">
+      <h2>Caretaker alerts</h2>
+      <p id="alerts">No alerts yet.</p>
+      <small>Demo mode: no real caretaker message is sent.</small>
+    </div>
+  </main>
+
+  <script>
+    let knownDue = new Set();
+
+    function speak(text) {
+      if ("speechSynthesis" in window) {
+        speechSynthesis.cancel();
+        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      }
+    }
+
+    function enableVoice() {
+      speak("Voice reminders are enabled.");
+      document.getElementById("message").textContent =
+        "Voice test played. Keep this page open for reminders.";
+    }
+
+    async function loadTasks() {
+      try {
+        const response = await fetch("/api/tasks");
+        const tasks = await response.json();
+
+        document.getElementById("tasks").innerHTML = tasks.map(task => `
+          <div style="border-top:1px solid #eee;padding:14px 0">
+            <strong>${task.name}</strong><br>
+            <small>Time: ${task.time} · Misses: ${task.misses} · Status: ${task.status}</small><br>
+            <button onclick="updateTask(${task.id},'complete')">Completed</button>
+            <button class="secondary" onclick="updateTask(${task.id},'missed')">Missed</button>
+          </div>
+        `).join("");
+      } catch (error) {
+        document.getElementById("tasks").textContent =
+          "Cannot connect to server. Start app.py and refresh.";
+      }
+    }
+
+    async function updateTask(id, action) {
+      const response = await fetch(`/api/tasks/${id}/${action}`, {
+        method: "POST"
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        alert(result.error || "Could not update task");
+        return;
+      }
+
+      if (result.caretaker_alert) {
+        document.getElementById("alerts").textContent =
+          result.caretaker_alert;
+        speak("A caretaker alert is required. This task has been missed repeatedly.");
+      } else {
+        speak(result.message);
+      }
+
+      await loadTasks();
+    }
+
+    async function checkDueTasks() {
+      try {
+        const response = await fetch("/api/due");
+        const tasks = await response.json();
+
+        for (const task of tasks) {
+          const key = `${new Date().toDateString()}-${task.id}-${task.time}`;
+
+          if (!knownDue.has(key)) {
+            knownDue.add(key);
+            document.getElementById("message").textContent =
+              `Reminder: ${task.name}`;
+            speak(`Reminder. It is time for ${task.name}.`);
+          }
+        }
+      } catch (error) {
+        // The server may be temporarily unavailable.
+      }
+    }
+
+    loadTasks();
+    setInterval(loadTasks, 30000);
+    setInterval(checkDueTasks, 10000);
+  </script>
+</body>
+</html>
