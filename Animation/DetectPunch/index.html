@@ -1,0 +1,210 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AI Punch Detection</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      background: #101827;
+      color: white;
+      font-family: Arial;
+      text-align: center;
+      padding: 15px;
+    }
+
+    video {
+      width: 100%;
+      max-width: 600px;
+      border-radius: 12px;
+      transform: scaleX(-1);
+    }
+
+    #status {
+      font-size: 25px;
+      margin: 20px;
+      color: #00ff99;
+    }
+
+    button {
+      padding: 14px 25px;
+      font-size: 18px;
+      border: none;
+      border-radius: 8px;
+      background: #1677ff;
+      color: white;
+      cursor: pointer;
+    }
+
+    #count {
+      font-size: 35px;
+      color: yellow;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>AI Punch Detection</h2>
+<p>Show your hand to the camera and punch!</p>
+
+<video id="video" autoplay playsinline></video>
+
+<div id="status">Click Start Camera</div>
+
+<button onclick="startCamera()">Start Camera</button>
+
+<h3>Punch Count</h3>
+<div id="count">0</div>
+
+<script type="module">
+
+import {
+  GestureRecognizer,
+  FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById("video");
+const status = document.getElementById("status");
+const countDisplay = document.getElementById("count");
+
+let recognizer;
+let punchCount = 0;
+let previous = null;
+let lastPunch = 0;
+
+async function startCamera() {
+
+  status.innerText = "Loading AI model...";
+
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+
+  recognizer = await GestureRecognizer.createFromOptions(
+    vision,
+    {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO",
+      numHands: 1
+    }
+  );
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: "user",
+      width: 640,
+      height: 480
+    }
+  });
+
+  video.srcObject = stream;
+
+  video.onloadeddata = () => {
+    status.innerText = "Show your hand";
+    detect();
+  };
+}
+
+function detect() {
+
+  if (!recognizer || video.readyState < 2) {
+    requestAnimationFrame(detect);
+    return;
+  }
+
+  const now = performance.now();
+
+  const result = recognizer.recognizeForVideo(video, now);
+
+  if (result.gestures.length > 0) {
+
+    const gesture = result.gestures[0][0];
+
+    const landmarks = result.landmarks[0];
+
+    // Check for a closed fist
+    const isFist = gesture.categoryName === "Closed_Fist";
+
+    // Calculate hand bounding box
+    const xs = landmarks.map(p => p.x);
+    const ys = landmarks.map(p => p.y);
+
+    const width = Math.max(...xs) - Math.min(...xs);
+    const height = Math.max(...ys) - Math.min(...ys);
+
+    const area = width * height;
+
+    // Approximate hand centre
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+
+    if (previous) {
+
+      const dt = (now - previous.time) / 1000;
+
+      if (dt > 0 && dt < 0.2) {
+
+        // Hand movement speed
+        const dx = cx - previous.cx;
+        const dy = cy - previous.cy;
+
+        const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+
+        // Hand expansion: punch towards camera
+        const expansion = area / Math.max(previous.area, 0.0001);
+
+        const fastMovement = speed > 1.4;
+        const forwardMovement = expansion > 1.35;
+
+        // Punch must be a fist and move rapidly
+        if (
+          isFist &&
+          (fastMovement || forwardMovement) &&
+          now - lastPunch > 900
+        ) {
+
+          punchCount++;
+          countDisplay.innerText = punchCount;
+
+          status.innerText = "🥊 PUNCH DETECTED!";
+          status.style.color = "#ff4040";
+
+          lastPunch = now;
+        }
+        else if (isFist) {
+          status.innerText = "FIST DETECTED";
+          status.style.color = "yellow";
+        }
+        else {
+          status.innerText = gesture.categoryName;
+          status.style.color = "#00ff99";
+        }
+      }
+    }
+
+    previous = {
+      cx,
+      cy,
+      area,
+      time: now
+    };
+
+  } else {
+    previous = null;
+    status.innerText = "Show your hand";
+  }
+
+  requestAnimationFrame(detect);
+}
+
+window.startCamera = startCamera;
+
+</script>
+
+</body>
+</html>
