@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Robot Playground — Hand-Tracked 3D</title>
+<style>
+:root{--bg:#07090d;--panel:#0d1117;--panel2:#131a24;--line:#1f2937;--text:#e6edf5;--mute:#8a98a9;--cy:#22d3ee;--cy2:#0e7490;--ok:#34d399;--warn:#fbbf24;--err:#f87171}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{min-height:100dvh}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 340px;height:100dvh}
+#viewport{position:relative;min-width:0;min-height:0;overflow:hidden;background:radial-gradient(ellipse at 50% 35%,#101826 0%,#090c11 70%)}
+#gl{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+.chip{position:absolute;left:14px;top:14px;display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:rgba(13,17,23,.72);backdrop-filter:blur(8px);font-size:12px;color:var(--mute);pointer-events:none}
+.chip b{color:var(--text);font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;background:#64748b;flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}.dot.warn{background:var(--warn)}.dot.err{background:var(--err)}
+.reticle{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border:2px solid rgba(34,211,238,.9);border-radius:50%;pointer-events:none;opacity:0;transition:opacity .12s,background .1s,border-color .1s;will-change:transform}
+.reticle.on{opacity:1}.reticle.pinch{background:rgba(34,211,238,.5);border-color:#fff}
+aside.panel{overflow:auto;border-left:1px solid var(--line);background:var(--panel);padding:18px;display:flex;flex-direction:column;gap:16px}
+h1{font-size:18px;margin:0;letter-spacing:.2px}
+.sub{margin:2px 0 0;color:var(--mute);font-size:12px}
+label.t{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--mute);margin-bottom:7px}
+select,button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;cursor:pointer;transition:border-color .15s,background .15s}
+select{width:100%}
+button:hover,select:hover{border-color:#2b3a4d}
+button:focus-visible,select:focus-visible{outline:2px solid var(--cy);outline-offset:1px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg button.active{background:rgba(34,211,238,.14);border-color:var(--cy);color:#bff6ff}
+button.primary{background:var(--cy2);border-color:#155e75}
+button.primary:hover{background:#0f8aa8}
+button.on{background:#7f1d1d;border-color:#991b1b}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.status{display:flex;align-items:center;gap:8px;font-size:13px}
+.hint{margin:8px 0 0;font-size:12.5px;color:var(--mute)}
+.preview{position:relative;margin-top:10px;width:100%;aspect-ratio:4/3;background:#06080b;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.preview video,.preview canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.preview video{object-fit:fill;opacity:.85}
+.preview .ph{position:absolute;inset:0;display:grid;place-items:center;color:#4b5a6c;font-size:12px}
+.err{margin-top:10px;padding:9px 11px;border:1px solid #7f1d1d;background:rgba(127,29,29,.25);border-radius:9px;color:#fecaca;font-size:12.5px}
+.guide{font-size:12.5px;color:var(--mute);border-top:1px solid var(--line);padding-top:14px}
+.guide ul{margin:6px 0 0;padding-left:18px}.guide li{margin:4px 0}.guide b{color:var(--text)}
+@media(max-width:860px){
+ .app{grid-template-columns:1fr;grid-template-rows:56dvh auto;height:auto;min-height:100dvh}
+ aside.panel{border-left:0;border-top:1px solid var(--line);overflow:visible}
+}
+</style>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<div class="app">
+  <main id="viewport">
+    <canvas id="gl" tabindex="0" aria-label="3D robot viewport"></canvas>
+    <div class="chip"><span class="dot" id="dot2"></span><b id="statusText2">Camera Off</b><span id="modeChip">· Drag</span></div>
+    <div class="reticle" id="ret0"></div><div class="reticle" id="ret1"></div>
+  </main>
+
+  <aside class="panel">
+    <header>
+      <h1>Robot Playground</h1>
+      <p class="sub">Hand-tracked 3D · Three.js + MediaPipe Hand Landmarker</p>
+    </header>
+
+    <section>
+      <label class="t" for="model">Model</label>
+      <select id="model"></select>
+    </section>
+
+    <section>
+      <label class="t">Interaction mode</label>
+      <div class="seg" role="group" aria-label="Interaction mode">
+        <button data-mode="drag" class="active" aria-pressed="true">Drag</button>
+        <button data-mode="rotate" aria-pressed="false">Rotate</button>
+        <button data-mode="scale" aria-pressed="false">Scale</button>
+      </div>
+      <p class="hint" id="hint"></p>
+    </section>
+
+    <section>
+      <label class="t">Hand tracking</label>
+      <div class="row">
+        <button id="cam" class="primary">Start Camera</button>
+        <div class="status"><span class="dot" id="dot"></span><span id="statusText">Camera Off</span></div>
+      </div>
+      <div class="preview" id="preview">
+        <video id="video" playsinline muted></video>
+        <canvas id="ov"></canvas>
+        <div class="ph" id="ph">Camera preview</div>
+      </div>
+      <div class="err" id="err" hidden></div>
+    </section>
+
+    <section>
+      <label class="t">View</label>
+      <div class="row2">
+        <button id="resetView">Reset View</button>
+        <button id="resetRot">Reset Rotation</button>
+      </div>
+    </section>
+
+    <section class="guide">
+      <b style="color:var(--text)">Gesture guide</b>
+      <ul>
+        <li><b>Drag</b> — pinch thumb + index on the robot, move, open fingers to drop.</li>
+        <li><b>Rotate</b> — pinch and move: left/right = Y, up/down = X. Tilt your wrist (like turning a knob) while pinching = Z.</li>
+        <li><b>Scale</b> — pinch with <b>both</b> hands, move them apart (bigger) or together (smaller).</li>
+        <li>Mouse/touch: drag the robot to move or rotate; drag empty space to orbit the camera; wheel scales in Scale mode.</li>
+      </ul>
+    </section>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const $ = id => document.getElementById(id);
+const PI = Math.PI;
+
+/* =====================================================================
+   RENDERER / SCENE
+   ===================================================================== */
+const viewport = $('viewport'), canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x090c11);
+scene.fog = new THREE.Fog(0x090c11, 10, 24);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+const DEFAULT_CAM = new THREE.Vector3(0, 1.7, 6.0);
+const DEFAULT_TARGET = new THREE.Vector3(0, 1.15, 0);
+camera.position.copy(DEFAULT_CAM);
+
+const controls = new OrbitControls(camera, canvas);
+controls.target.copy(DEFAULT_TARGET);
+controls.enableDamping = true;
+controls.dampingFactor = 0.09;
+controls.minDistance = 2.5;
+controls.maxDistance = 14;
+controls.maxPolarAngle = PI * 0.495;
+controls.autoRotate = false;
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0x8fb4ff, 0x10141b, 0.45));
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+key.position.set(3.5, 7, 4.5);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 20 });
+key.shadow.bias = -0.0004;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x22d3ee, 1.6);
+rim.position.set(-4, 3, -4);
+scene.add(rim);
+const fill = new THREE.DirectionalLight(0x6d8cff, 0.5);
+fill.position.set(-5, 2, 3);
+scene.add(fill);
+
+const floor = new THREE.Mesh(new THREE.CircleGeometry(7, 64),
+  new THREE.MeshStandardMaterial({ color: 0x0d1118, roughness: 0.85, metalness: 0.25 }));
+floor.rotation.x = -PI / 2; floor.receiveShadow = true; scene.add(floor);
+const grid = new THREE.GridHelper(14, 28, 0x1d4352, 0x141d28);
+grid.position.y = 0.003; grid.material.transparent = true; grid.material.opacity = 0.7; scene.add(grid);
+
+function resize() {
+  const w = Math.max(viewport.clientWidth, 1), h = Math.max(viewport.clientHeight, 1);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  const aspect = w / h;
+  camera.aspect = aspect;
+  // keep the robot's width in frame on narrow (portrait) screens
+  camera.fov = aspect < 1 ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(20)) / aspect * 0.9)) : 40;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+window.addEventListener('resize', resize);
+resize();
+
+/* =====================================================================
+   PROCEDURAL ROBOT MODELS
+   ===================================================================== */
+const std = (color, metal, rough) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough });
+const glowMat = (c, i = 1.8) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: i, metalness: 0.1, roughness: 0.35 });
+function add(p, geo, mat, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); p.add(m); return m; }
+const rbox = (p, w, h, d, r, mat, x, y, z) => add(p, new RoundedBoxGeometry(w, h, d, 3, Math.min(r, Math.min(w, h, d) * 0.49)), mat, x, y, z);
+const cyl = (p, rt, rb, h, mat, x, y, z, seg = 24) => add(p, new THREE.CylinderGeometry(rt, rb, h, seg), mat, x, y, z);
+const sph = (p, r, mat, x, y, z, ws = 28, hs = 18) => add(p, new THREE.SphereGeometry(r, ws, hs), mat, x, y, z);
+const caps = (p, r, len, mat, x, y, z) => add(p, new THREE.CapsuleGeometry(r, len, 6, 16), mat, x, y, z);
+const ring = (p, R, t, mat, x, y, z) => { const m = add(p, new THREE.TorusGeometry(R, t, 10, 36), mat, x, y, z); m.rotation.x = PI / 2; return m; };
+
+function buildHand(p, o, m, sd, y) {
+  const s = o.handScale || 1, H = new THREE.Group(); H.position.y = y; p.add(H);
+  if (o.fist) {
+    rbox(H, 0.16 * s, 0.15 * s, 0.14 * s, 0.04, m.dark, 0, -0.07 * s, 0);
+    for (let k = 0; k < 4; k++) rbox(H, 0.032 * s, 0.032 * s, 0.025 * s, 0.01, m.secondary, (k - 1.5) * 0.036 * s, -0.13 * s, 0.075 * s);
+    rbox(H, 0.05 * s, 0.05 * s, 0.1 * s, 0.02, m.dark, -sd * 0.09 * s, -0.06 * s, 0.03 * s);
+  } else {
+    rbox(H, 0.09 * s, 0.1 * s, 0.045 * s, 0.02, m.dark, 0, -0.05 * s, 0);
+    for (let k = 0; k < 4; k++) rbox(H, 0.018 * s, 0.085 * s, 0.022 * s, 0.008, m.secondary, (k - 1.5) * 0.024 * s, -0.14 * s, 0);
+    const th = rbox(H, 0.02 * s, 0.065 * s, 0.025 * s, 0.008, m.secondary, -sd * 0.058 * s, -0.08 * s, 0.01 * s);
+    th.rotation.z = sd * 0.55;
+  }
+}
+
+function buildHead(o, m, y) {
+  const h = new THREE.Group(); h.position.y = y;
+  if (o.headType === 'round') {
+    const r = o.headW / 2;
+    const s = sph(h, r, m.primary, 0, 0, 0, 36, 24); s.scale.set(0.95, 1.12, 1.0);
+    const face = sph(h, r * 0.93, m.dark, 0, -0.01, r * 0.12, 36, 24); face.scale.set(0.82, 0.62, 1.0);
+    for (const sd of [-1, 1]) {
+      const e = caps(h, r * 0.07, r * 0.12, m.glow, sd * r * 0.3, 0.0, r * 1.02); e.rotation.z = PI / 2 * 0 ;
+      cyl(h, r * 0.2, r * 0.2, 0.05, m.secondary, sd * r * 0.93, 0, 0).rotation.z = PI / 2;
+      cyl(h, r * 0.1, r * 0.1, 0.06, m.glow, sd * r * 0.95, 0, 0).rotation.z = PI / 2;
+    }
+    ring(h, r * 0.78, 0.01, m.glow, 0, r * 0.62, 0);
+  } else if (o.headType === 'helmet') {
+    rbox(h, o.headW, o.headH, o.headD, 0.1, m.primary, 0, 0, 0);
+    rbox(h, o.headW * 1.04, 0.07, o.headD * 1.04, 0.03, m.secondary, 0, o.headH * 0.28, 0.01);
+    rbox(h, o.headW * 0.82, 0.05, 0.05, 0.015, m.glow, 0, o.headH * 0.08, o.headD / 2 + 0.005);
+    rbox(h, o.headW * 0.9, o.headH * 0.34, 0.07, 0.03, m.dark, 0, -o.headH * 0.28, o.headD / 2 + 0.01);
+    for (let k = -2; k <= 2; k++) rbox(h, 0.02, 0.1, 0.012, 0.004, m.glow, k * 0.05, -o.headH * 0.28, o.headD / 2 + 0.05);
+    rbox(h, 0.06, 0.12, o.headD * 0.9, 0.02, m.accent, 0, o.headH / 2 + 0.05, -0.02);
+    for (const sd of [-1, 1]) cyl(h, 0.07, 0.07, 0.06, m.dark, sd * (o.headW / 2 + 0.02), 0, 0).rotation.z = PI / 2;
+  } else {
+    rbox(h, o.headW, o.headH, o.headD, 0.1, m.primary, 0, 0, 0);
+    rbox(h, o.headW * 0.86, o.headH * 0.5, 0.05, 0.03, m.dark, 0, 0.01, o.headD / 2 + 0.002);
+    rbox(h, o.headW * 0.7, 0.045, 0.02, 0.01, m.glow, 0, 0.03, o.headD / 2 + 0.03);
+    rbox(h, o.headW * 0.4, 0.015, 0.02, 0.005, m.glow, 0, -0.04, o.headD / 2 + 0.03);
+    rbox(h, o.headW * 0.5, o.headH * 0.16, o.headD * 0.9, 0.03, m.secondary, 0, -o.headH * 0.4, 0.01);
+    rbox(h, 0.05, 0.05, o.headD * 0.7, 0.015, m.secondary, 0, o.headH / 2 + 0.01, -0.03);
+    for (const sd of [-1, 1]) {
+      cyl(h, 0.06, 0.06, 0.05, m.dark, sd * (o.headW / 2 + 0.02), 0, 0).rotation.z = PI / 2;
+      cyl(h, 0.03, 0.03, 0.055, m.glow, sd * (o.headW / 2 + 0.025), 0, 0).rotation.z = PI / 2;
+    }
+    cyl(h, 0.008, 0.008, 0.2, m.secondary, 0.1, o.headH / 2 + 0.1, -0.05);
+    sph(h, 0.02, m.glow, 0.1, o.headH / 2 + 0.2, -0.05, 12, 8);
+  }
+  return h;
+}
+
+function buildHumanoid(o) {
+  const g = new THREE.Group(), m = o.m;
+  const footH = 0.11, ankleY = footH + 0.03;
+  const kneeY = ankleY + o.shinL, hipY = kneeY + o.thighL;
+  const hipX = o.pelvisW * 0.3, tr = o.thighR;
+
+  // ---- legs
+  for (const sd of [-1, 1]) {
+    const L = new THREE.Group(); L.position.set(sd * hipX, hipY, 0); g.add(L);
+    sph(L, tr * 1.15, m.dark, 0, 0, 0);
+    cyl(L, tr, tr * 0.78, o.thighL, m.primary, 0, -o.thighL / 2, 0);
+    rbox(L, tr * 1.6, o.thighL * 0.5, tr * 0.7, 0.03, m.secondary, 0, -o.thighL * 0.38, tr * 0.85);
+    ring(L, tr * 0.86, 0.012, m.glow, 0, -o.thighL * 0.9, 0);
+    sph(L, tr * 0.95, m.dark, 0, -o.thighL, 0);
+    rbox(L, tr * 1.4, tr * 1.2, tr * 0.8, 0.04, m.primary, 0, -o.thighL, tr * 0.85);
+    cyl(L, tr * 0.78, tr * 0.62, o.shinL, m.primary, 0, -o.thighL - o.shinL / 2, 0);
+    rbox(L, tr * 1.5, o.shinL * 0.55, tr * 0.8, 0.04, m.secondary, 0, -o.thighL - o.shinL * 0.38, -tr * 0.7);
+    rbox(L, 0.016, o.shinL * 0.5, 0.012, 0.004, m.glow, 0, -o.thighL - o.shinL * 0.5, tr * 0.64);
+    sph(L, tr * 0.6, m.dark, 0, ankleY - hipY, 0, 20, 12);
+    rbox(L, o.footW, footH, o.footL, 0.04, m.dark, 0, footH / 2 - hipY, o.footL * 0.18);
+    rbox(L, o.footW * 0.92, footH * 0.7, o.footL * 0.32, 0.03, m.primary, 0, footH * 0.62 - hipY, o.footL * 0.5);
+    rbox(L, o.footW * 0.6, 0.02, 0.012, 0.004, m.glow, 0, footH * 0.5 - hipY, o.footL * 0.67);
+  }
+
+  // ---- pelvis, waist, torso
+  rbox(g, o.pelvisW, 0.2, o.torsoD * 0.8, 0.06, m.dark, 0, hipY + 0.02, 0);
+  rbox(g, o.pelvisW * 0.7, 0.12, o.torsoD * 0.85, 0.04, m.primary, 0, hipY + 0.06, 0);
+  const waistY = hipY + 0.22;
+  cyl(g, o.waistR, o.waistR * 1.1, 0.26, m.dark, 0, waistY, 0, 20);
+  for (let i = -1; i <= 1; i++) ring(g, o.waistR * 1.08, 0.012, m.secondary, 0, waistY + i * 0.08, 0);
+  const torsoY = waistY + 0.12 + o.torsoH / 2, torsoTop = torsoY + o.torsoH / 2;
+  rbox(g, o.torsoW, o.torsoH, o.torsoD, 0.1, m.primary, 0, torsoY, 0);
+  rbox(g, o.torsoW * 0.78, o.torsoH * 0.46, 0.05, 0.02, m.dark, 0, torsoY + o.torsoH * 0.14, o.torsoD / 2 + 0.002);
+  cyl(g, 0.07, 0.07, 0.04, m.glow, 0, torsoY + o.torsoH * 0.14, o.torsoD / 2 + 0.03, 24).rotation.x = PI / 2;
+  ring(g, 0.1, 0.01, m.secondary, 0, 0, 0).rotation.set(0, 0, 0);
+  g.children[g.children.length - 1].position.set(0, torsoY + o.torsoH * 0.14, o.torsoD / 2 + 0.03);
+  for (let i = 0; i < 3; i++) rbox(g, o.torsoW * (0.5 - i * 0.07), 0.035, 0.03, 0.01, m.secondary, 0, torsoY - o.torsoH * 0.12 - i * 0.065, o.torsoD / 2 + 0.01);
+  for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) rbox(g, 0.012, 0.09, 0.012, 0.003, m.glow, sd * (o.torsoW / 2 + 0.002), torsoY - 0.05 - i * 0.0 , -0.06 + i * 0.06);
+  rbox(g, o.torsoW * 0.7, o.torsoH * 0.8, 0.16, 0.04, m.secondary, 0, torsoY, -o.torsoD / 2 - 0.07);
+
+  // ---- neck + head
+  cyl(g, 0.07, 0.085, 0.14, m.dark, 0, torsoTop + 0.03, 0, 16);
+  g.add(buildHead(o, m, torsoTop + 0.1 + o.headH / 2));
+
+  // ---- arms
+  const sx = o.torsoW / 2 + o.shoulderR * 0.55, sy = torsoTop - o.shoulderR * 0.95, ar = o.armR;
+  for (const sd of [-1, 1]) {
+    const A = new THREE.Group(); A.position.set(sd * sx, sy, 0); A.rotation.z = sd * 0.07; g.add(A);
+    sph(A, o.shoulderR, m.dark, 0, 0, 0);
+    if (!o.noPauldron) rbox(A, o.shoulderR * 2.1, o.shoulderR * 1.1, o.shoulderR * 2.2, 0.05, m.secondary, sd * 0.01, o.shoulderR * 0.5, 0);
+    cyl(A, ar, ar * 0.85, o.upperL, m.primary, 0, -o.upperL / 2 - 0.02, 0);
+    ring(A, ar * 1.02, 0.01, m.glow, 0, -o.upperL * 0.3, 0);
+    sph(A, ar * 1.12, m.dark, 0, -o.upperL - 0.02, 0);
+    cyl(A, ar * 1.05, ar * 0.7, o.foreL, m.primary, 0, -o.upperL - 0.02 - o.foreL / 2, 0);
+    rbox(A, ar * 2.3, o.foreL * 0.45, ar * 2.0, 0.03, m.secondary, 0, -o.upperL - o.foreL * 0.35, 0);
+    ring(A, ar * 0.8, 0.012, m.glow, 0, -o.upperL - o.foreL + 0.0, 0);
+    buildHand(A, o, m, sd, -o.upperL - o.foreL - 0.02);
+  }
+  if (o.extras) o.extras(g, { sx, sy, torsoY, torsoTop, hipY, torsoW: o.torsoW, torsoH: o.torsoH, torsoD: o.torsoD, headY: torsoTop + 0.1 + o.headH / 2 }, m);
+  return g;
+}
+
+function buildService() {
+  const g = new THREE.Group();
+  const W = std(0xf1f4f8, 0.35, 0.28), T = std(0x14b8a6, 0.5, 0.35), D = std(0x1b1f26, 0.6, 0.45), S = std(0xaab3bf, 0.9, 0.3), Gm = glowMat(0x00e5ff);
+  for (const sd of [-1, 1]) {
+    rbox(g, 0.2, 0.26, 0.95, 0.1, D, sd * 0.46, 0.13, 0);
+    for (const z of [-0.32, 0, 0.32]) { cyl(g, 0.11, 0.11, 0.215, S, sd * 0.46, 0.13, z).rotation.z = PI / 2; cyl(g, 0.05, 0.05, 0.225, D, sd * 0.46, 0.13, z).rotation.z = PI / 2; }
+    rbox(g, 0.02, 0.05, 0.7, 0.01, Gm, sd * 0.565, 0.18, 0);
+  }
+  rbox(g, 0.86, 0.12, 0.8, 0.05, S, 0, 0.3, 0);
+  rbox(g, 0.72, 0.62, 0.6, 0.22, W, 0, 0.7, 0);
+  rbox(g, 0.74, 0.06, 0.62, 0.03, T, 0, 0.5, 0);
+  rbox(g, 0.38, 0.24, 0.03, 0.05, D, 0, 0.8, 0.305);
+  for (let i = 0; i < 3; i++) rbox(g, 0.24 - i * 0.05, 0.025, 0.012, 0.005, Gm, 0, 0.86 - i * 0.055, 0.325);
+  for (let i = 0; i < 3; i++) sph(g, 0.017, i === 0 ? Gm : std(0x64748b, 0.4, 0.4), -0.1 + i * 0.1, 0.62, 0.31, 12, 8);
+  cyl(g, 0.1, 0.12, 0.12, D, 0, 1.05, 0, 20);
+  rbox(g, 0.66, 0.44, 0.5, 0.18, W, 0, 1.3, 0);
+  rbox(g, 0.5, 0.3, 0.04, 0.1, D, 0, 1.3, 0.252);
+  for (const sd of [-1, 1]) {
+    caps(g, 0.035, 0.07, Gm, sd * 0.1, 1.33, 0.278);
+    cyl(g, 0.09, 0.09, 0.06, T, sd * 0.36, 1.3, 0, 24).rotation.z = PI / 2;
+    cyl(g, 0.045, 0.045, 0.07, Gm, sd * 0.36, 1.3, 0, 20).rotation.z = PI / 2;
+  }
+  const smile = add(g, new THREE.TorusGeometry(0.07, 0.012, 8, 24, PI), Gm, 0, 1.27, 0.278); smile.rotation.z = PI;
+  cyl(g, 0.012, 0.012, 0.2, S, 0.15, 1.62, -0.05, 8);
+  sph(g, 0.04, Gm, 0.15, 1.73, -0.05, 16, 10);
+  for (const sd of [-1, 1]) {
+    const A = new THREE.Group(); A.position.set(sd * 0.43, 0.88, 0.02); A.rotation.set(-0.4, 0, sd * 0.1); g.add(A);
+    sph(A, 0.09, S, 0, 0, 0);
+    cyl(A, 0.04, 0.04, 0.3, W, 0, -0.17, 0);
+    sph(A, 0.05, D, 0, -0.33, 0, 16, 10);
+    cyl(A, 0.035, 0.03, 0.26, W, 0, -0.48, 0);
+    ring(A, 0.037, 0.01, Gm, 0, -0.58, 0);
+    rbox(A, 0.1, 0.06, 0.07, 0.02, D, 0, -0.63, 0);
+    for (const c of [-1, 1]) { const cl = rbox(A, 0.022, 0.12, 0.04, 0.008, S, c * 0.035, -0.71, 0); cl.rotation.z = c * -0.12; }
+  }
+  rbox(g, 0.4, 0.4, 0.14, 0.05, S, 0, 0.72, -0.37);
+  rbox(g, 0.3, 0.025, 0.02, 0.005, Gm, 0, 0.8, -0.445);
+  return g;
+}
+
+const HUM = {
+  m: { primary: std(0xc6ced9, 0.92, 0.28), secondary: std(0x8d97a6, 0.9, 0.38), dark: std(0x1a1e25, 0.75, 0.4), glow: glowMat(0x00e5ff), accent: std(0x00bcd4, 0.6, 0.4) },
+  torsoW: 0.74, torsoH: 0.55, torsoD: 0.42, pelvisW: 0.5, waistR: 0.17, shoulderR: 0.13, armR: 0.065, upperL: 0.36, foreL: 0.38,
+  thighR: 0.105, thighL: 0.5, shinL: 0.5, footW: 0.17, footL: 0.34, headW: 0.34, headH: 0.36, headD: 0.36, headType: 'box', handScale: 1,
+  extras(g, c, m) {
+    for (const sd of [-1, 1]) {
+      cyl(g, 0.06, 0.07, 0.16, m.dark, sd * 0.2, c.torsoY + 0.1, -c.torsoD / 2 - 0.19);
+      cyl(g, 0.045, 0.045, 0.02, m.glow, sd * 0.2, c.torsoY + 0.18, -c.torsoD / 2 - 0.19);
+      cyl(g, 0.045, 0.045, 0.02, m.glow, sd * 0.2, c.torsoY + 0.02, -c.torsoD / 2 - 0.19);
+      rbox(g, 0.04, 0.2, 0.05, 0.01, m.glow, sd * (c.torsoW / 2 - 0.1), c.torsoY + 0.0, c.torsoD / 2 + 0.005);
+    }
+  }
+};
+const HEAVY = {
+  m: { primary: std(0x59626d, 0.85, 0.38), secondary: std(0x8b949e, 0.9, 0.33), dark: std(0x14171c, 0.7, 0.5), glow: glowMat(0x00e5ff), accent: std(0xf0a020, 0.5, 0.45) },
+  torsoW: 1.0, torsoH: 0.7, torsoD: 0.6, pelvisW: 0.7, waistR: 0.22, shoulderR: 0.2, armR: 0.1, upperL: 0.34, foreL: 0.36,
+  thighR: 0.15, thighL: 0.42, shinL: 0.42, footW: 0.26, footL: 0.44, headW: 0.4, headH: 0.3, headD: 0.4, headType: 'helmet', handScale: 1.35, fist: true, noPauldron: true,
+  extras(g, c, m) {
+    for (const sd of [-1, 1]) {
+      const x = sd * (c.sx + 0.04);
+      rbox(g, 0.52, 0.3, 0.58, 0.1, m.primary, x, c.sy + 0.14, 0).rotation.z = sd * -0.25;
+      rbox(g, 0.54, 0.05, 0.6, 0.02, m.accent, x, c.sy + 0.3, 0).rotation.z = sd * -0.25;
+      rbox(g, 0.26, 0.3, 0.1, 0.03, m.secondary, sd * 0.3, c.hipY - 0.12, 0.3).rotation.x = 0.1;
+      cyl(g, 0.08, 0.08, 0.8, m.dark, sd * 0.28, c.torsoY + 0.3, -c.torsoD / 2 - 0.15);
+      cyl(g, 0.055, 0.055, 0.03, m.glow, sd * 0.28, c.torsoY + 0.7, -c.torsoD / 2 - 0.15);
+    }
+    rbox(g, c.torsoW * 0.95, c.torsoH * 0.5, 0.12, 0.04, m.secondary, 0, c.torsoY + c.torsoH * 0.16, c.torsoD / 2 + 0.05);
+    for (let i = 0; i < 2; i++) rbox(g, 0.5 - i * 0.12, 0.05, 0.02, 0.01, m.accent, 0, c.torsoY + 0.02 - i * 0.09, c.torsoD / 2 + 0.115);
+    rbox(g, 0.18, 0.12, 0.04, 0.02, m.glow, 0, c.torsoY + c.torsoH * 0.22, c.torsoD / 2 + 0.115);
+    const cn = cyl(g, 0.06, 0.07, 0.55, m.dark, c.sx + 0.12, c.sy + 0.42, 0.14); cn.rotation.x = PI / 2;
+    cyl(g, 0.04, 0.04, 0.03, m.glow, c.sx + 0.12, c.sy + 0.42, 0.42).rotation.x = PI / 2;
+    for (const sd of [-1, 1]) rbox(g, 0.28, 0.2, 0.12, 0.05, m.secondary, sd * c.torsoW * 0.1, c.hipY - 0.55, 0.14);
+  }
+};
+const ANDROID = {
+  m: { primary: std(0xe9eef4, 0.45, 0.22), secondary: std(0x2c323b, 0.8, 0.35), dark: std(0x0c0e12, 0.5, 0.3), glow: glowMat(0x7df9ff, 2.2), accent: std(0xb8c2cf, 0.9, 0.25) },
+  torsoW: 0.52, torsoH: 0.5, torsoD: 0.3, pelvisW: 0.38, waistR: 0.1, shoulderR: 0.08, armR: 0.042, upperL: 0.4, foreL: 0.42,
+  thighR: 0.07, thighL: 0.56, shinL: 0.56, footW: 0.11, footL: 0.28, headW: 0.28, headH: 0.3, headD: 0.3, headType: 'round', handScale: 0.8, noPauldron: true,
+  extras(g, c, m) {
+    rbox(g, 0.012, c.torsoH * 0.8, 0.012, 0.003, m.glow, 0, c.torsoY, c.torsoD / 2 + 0.003);
+    for (const sd of [-1, 1]) {
+      rbox(g, 0.012, c.torsoH * 0.6, 0.012, 0.003, m.glow, sd * c.torsoW * 0.32, c.torsoY, c.torsoD / 2 + 0.003);
+      rbox(g, 0.1, 0.012, 0.012, 0.003, m.glow, sd * 0.07, c.torsoY + 0.1, c.torsoD / 2 + 0.003);
+    }
+    rbox(g, 0.014, c.torsoH * 0.9, 0.014, 0.003, m.glow, 0, c.torsoY, -c.torsoD / 2 - 0.003);
+    ring(g, 0.1, 0.012, m.glow, 0, c.torsoTop + 0.02, 0);
+  }
+};
+
+const MODELS = {
+  humanoid: { label: 'Futuristic Humanoid Robot', height: 2.3, build: () => buildHumanoid(HUM) },
+  heavy:    { label: 'Heavy Armor Robot',          height: 2.4, build: () => buildHumanoid(HEAVY) },
+  service:  { label: 'Compact Service Robot',      height: 1.75, build: buildService },
+  android:  { label: 'Sleek Android Robot',        height: 2.35, build: () => buildHumanoid(ANDROID) },
+};
+const modelSel = $('model');
+for (const [k, v] of Object.entries(MODELS)) { const o = document.createElement('option'); o.value = k; o.textContent = v.label; modelSel.appendChild(o); }
+
+function disposeObject(root) {
+  root.traverse(c => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(mm => mm.dispose());
+  });
+}
+
+/* =====================================================================
+   ROBOT TRANSFORM STATE  (T = target, robotRoot = smoothed current)
+   ===================================================================== */
+const robotRoot = new THREE.Group(); scene.add(robotRoot);
+const T = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), scale: 1 };
+const SCALE_MIN = 0.35, SCALE_MAX = 2.4;
+let model = null, modelH = 2.3, modelR = 1;
+
+function loadModel(key) {
+  if (model) { robotRoot.remove(model); disposeObject(model); model = null; }
+  const def = MODELS[key], g = def.build();
+  g.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  let box = new THREE.Box3().setFromObject(g);
+  g.scale.setScalar(def.height / (box.max.y - box.min.y));
+  box = new THREE.Box3().setFromObject(g);
+  g.position.sub(box.getCenter(new THREE.Vector3()));
+  const size = box.getSize(new THREE.Vector3());
+  const pivot = new THREE.Group(); pivot.add(g);
+  model = pivot; modelH = size.y; modelR = size.length() * 0.5 * 0.75;
+  robotRoot.add(model);
+  endGesture(false);
+  resetRobot(true);
+}
+function resetRobot(snap) {
+  T.pos.set(0, modelH / 2, 0); T.quat.identity(); T.scale = 1;
+  if (snap) { robotRoot.position.copy(T.pos); robotRoot.quaternion.copy(T.quat); robotRoot.scale.setScalar(1); }
+}
+function clampPos() {
+  T.pos.x = THREE.MathUtils.clamp(T.pos.x, -4.5, 4.5);
+  T.pos.y = THREE.MathUtils.clamp(T.pos.y, 0.15, 4.5);
+  T.pos.z = THREE.MathUtils.clamp(T.pos.z, -3, 3);
+}
+const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1), qa = new THREE.Quaternion();
+function rotateBy(yaw, pitch, roll) {            // world-space incremental rotation (quaternion based: no gimbal lock)
+  if (yaw)   T.quat.premultiply(qa.setFromAxisAngle(AY, yaw));
+  if (pitch) T.quat.premultiply(qa.setFromAxisAngle(AX, pitch));
+  if (roll)  T.quat.premultiply(qa.setFromAxisAngle(AZ, roll));
+  T.quat.normalize();
+}
+function smoothRobot(dt) {
+  const kp = 1 - Math.exp(-dt * 16), ks = 1 - Math.exp(-dt * 12), kr = 1 - Math.exp(-dt * 18);
+  robotRoot.position.lerp(T.pos, kp);
+  if (robotRoot.position.distanceToSquared(T.pos) < 1e-10) robotRoot.position.copy(T.pos);
+  robotRoot.quaternion.slerp(T.quat, kr);
+  if (robotRoot.quaternion.angleTo(T.quat) < 1e-5) robotRoot.quaternion.copy(T.quat);
+  let s = robotRoot.scale.x + (T.scale - robotRoot.scale.x) * ks;
+  if (Math.abs(s - T.scale) < 1e-5) s = T.scale;
+  robotRoot.scale.setScalar(s);
+}
+
+/* camera reset tween */
+let camTween = null;
+function resetView() {
+  endGesture(false);
+  resetRobot(false);
+  camTween = { t0: performance.now(), p0: camera.position.clone(), t0v: controls.target.clone() };
+}
+function stepCamTween(now) {
+  if (!camTween) return;
+  const k = Math.min(1, (now - camTween.t0) / 500), e = k * k * (3 - 2 * k);
+  camera.position.lerpVectors(camTween.p0, DEFAULT_CAM, e);
+  controls.target.lerpVectors(camTween.t0v, DEFAULT_TARGET, e);
+  if (k >= 1) camTween = null;
+}
+
+/* =====================================================================
+   UI STATE
+   ===================================================================== */
+let mode = 'drag';
+const HINTS = {
+  drag: 'Pinch thumb + index on the robot, move your hand, open your fingers to drop it.',
+  rotate: 'Pinch and move: left/right turns Y, up/down tilts X. Tilt your wrist while pinching to roll Z.',
+  scale: 'Pinch with both hands, then move them apart to enlarge or together to shrink.',
+};
+function setMode(m) {
+  if (m === mode) return;
+  endGesture(false);
+  mode = m;
+  document.querySelectorAll('.seg button').forEach(b => { const a = b.dataset.mode === m; b.classList.toggle('active', a); b.setAttribute('aria-pressed', a); });
+  $('hint').textContent = HINTS[m];
+  $('modeChip').textContent = '· ' + m[0].toUpperCase() + m.slice(1);
+  controls.enableZoom = m !== 'scale';
+}
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('hint').textContent = HINTS.drag;
+modelSel.addEventListener('change', () => loadModel(modelSel.value));
+$('resetView').addEventListener('click', resetView);
+$('resetRot').addEventListener('click', () => { endGesture(false); T.quat.identity(); });
+
+const STATUS = { off: ['Camera Off', ''], requesting: ['Requesting Camera…', 'warn'], loading: ['Loading Hand Tracker…', 'warn'], none: ['No Hand Detected', 'warn'], tracking: ['Tracking Hands', 'ok'], error: ['Camera Error', 'err'] };
+let statusKey = '', statusCount = -1;
+function setStatus(k, n = 0) {
+  if (k === statusKey && n === statusCount) return;
+  statusKey = k; statusCount = n;
+  let text = STATUS[k][0];
+  if (k === 'tracking') text = `Tracking ${n} Hand${n > 1 ? 's' : ''}`;
+  for (const id of ['', '2']) { $('statusText' + id).textContent = text; $('dot' + id).className = 'dot ' + STATUS[k][1]; }
+}
+function showError(msg) { const e = $('err'); e.textContent = msg; e.hidden = false; }
+function clearError() { $('err').hidden = true; }
+setStatus('off');
+
+/* =====================================================================
+   FILTERS
+   ===================================================================== */
+class OneEuro {
+  constructor(mc = 1, beta = 0, dc = 1) { this.mc = mc; this.beta = beta; this.dc = dc; this.reset(); }
+  reset() { this.x = null; this.dx = 0; this.t = 0; }
+  a(cut, dt) { const tau = 1 / (2 * PI * cut); return 1 / (1 + tau / dt); }
+  filter(v, t) {
+    if (this.x === null) { this.x = v; this.t = t; return v; }
+    const dt = Math.max((t - this.t) / 1000, 1e-3); this.t = t;
+    this.dx += this.a(this.dc, dt) * ((v - this.x) / dt - this.dx);
+    this.x += this.a(this.mc + this.beta * Math.abs(this.dx), dt) * (v - this.x);
+    return this.x;
+  }
+}
+
+/* =====================================================================
+   HAND TRACKING (MediaPipe Hand Landmarker, official Tasks Vision API)
+   ===================================================================== */
+const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+const video = $('video'), ov = $('ov'), octx = ov.getContext('2d');
+let landmarker = null, stream = null, camOn = false, camBusy = false, lastVideoTime = -1, handCount = 0;
+
+async function ensureLandmarker() {
+  if (landmarker) return;
+  const vision = await import(VISION_URL + '/vision_bundle.mjs');
+  const fileset = await vision.FilesetResolver.forVisionTasks(VISION_URL + '/wasm');
+  const opts = d => ({ baseOptions: { modelAssetPath: MODEL_URL, delegate: d }, runningMode: 'VIDEO', numHands: 2,
+    minHandDetectionConfidence: 0.6, minHandPresenceConfidence: 0.6, minTrackingConfidence: 0.5 });
+  try { landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts('GPU')); }
+  catch (e) { console.warn('GPU delegate failed, using CPU', e); landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts('CPU')); }
+}
+
+async function startCamera() {
+  if (camBusy || camOn) return;
+  camBusy = true; clearError(); setStatus('requesting');
+  $('cam').disabled = true;
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('no-api'), { name: 'NoApi' });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false });
+    video.srcObject = stream; await video.play();
+    $('preview').style.aspectRatio = `${video.videoWidth || 4} / ${video.videoHeight || 3}`;
+    ov.width = video.videoWidth || 640; ov.height = video.videoHeight || 480;
+    $('ph').style.display = 'none';
+    setStatus('loading');
+    await ensureLandmarker();
+    camOn = true; lastVideoTime = -1;
+    $('cam').textContent = 'Stop Camera'; $('cam').classList.add('on');
+    setStatus('none');
+  } catch (e) {
+    console.error(e);
+    let msg = 'Could not start hand tracking: ' + (e.message || e);
+    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') msg = 'Camera permission was denied. Allow camera access for this site (lock icon in the address bar), then press Start Camera again.';
+    else if (e.name === 'NotFoundError' || e.name === 'OverconstrainedError') msg = 'No camera was found on this device.';
+    else if (e.name === 'NotReadableError') msg = 'The camera is in use by another application. Close it and try again.';
+    else if (e.name === 'NoApi') msg = 'Camera access needs a secure context. Open the page via localhost (e.g. VS Code Live Server) or HTTPS.';
+    else if (!landmarker) msg = 'Failed to load the MediaPipe hand tracker from the CDN. Check your internet connection and reload. (' + (e.message || e) + ')';
+    stopCamera(); showError(msg); setStatus('error');
+  } finally { camBusy = false; $('cam').disabled = false; }
+}
+function stopCamera() {
+  camOn = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  octx.clearRect(0, 0, ov.width, ov.height);
+  $('ph').style.display = 'grid';
+  $('cam').textContent = 'Start Camera'; $('cam').classList.remove('on');
+  handCount = 0; resetSlots(); endGesture(false); hideReticles();
+  if (statusKey !== 'error') setStatus('off');
+}
+$('cam').addEventListener('click', () => camOn ? stopCamera() : startCamera());
+window.addEventListener('beforeunload', () => { if (stream) stream.getTracks().forEach(t => t.stop()); });
+
+/* ---- per-hand slots (sorted left→right on screen) ---- */
+const PINCH_ON = 0.30, PINCH_OFF = 0.52, ON_FRAMES = 2, OFF_FRAMES = 2;   // thresholds are relative to palm size
+const newSlot = () => ({ fx: new OneEuro(1.5, 6), fy: new OneEuro(1.5, 6), fr: new OneEuro(2, 2), fa: new OneEuro(1.2, 1),
+  x: 0.5, y: 0.5, ratio: 1, angle: 0, pinched: false, cnt: 0, blocked: false });
+const slots = [newSlot(), newSlot()];
+function resetSlot(s) { s.fx.reset(); s.fy.reset(); s.fr.reset(); s.fa.reset(); s.pinched = false; s.cnt = 0; s.blocked = false; }
+function resetSlots() { slots.forEach(resetSlot); }
+
+function updatePinch(s) {
+  if (!s.pinched) {
+    if (s.ratio < PINCH_ON) { if (++s.cnt >= ON_FRAMES) { s.pinched = true; s.cnt = 0; } } else s.cnt = 0;
+  } else {
+    if (s.ratio > PINCH_OFF) { if (++s.cnt >= OFF_FRAMES) { s.pinched = false; s.cnt = 0; s.blocked = false; } } else s.cnt = 0;
+  }
+}
+const d2 = (a, b, asp) => Math.hypot((a.x - b.x) * asp, a.y - b.y);
+
+const CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawOverlay(all) {
+  octx.clearRect(0, 0, ov.width, ov.height);
+  const W = ov.width, H = ov.height;
+  all.forEach(lm => {
+    octx.lineWidth = 2; octx.strokeStyle = 'rgba(34,211,238,.75)';
+    octx.beginPath(); CONN.forEach(([a, b]) => { octx.moveTo(lm[a].x * W, lm[a].y * H); octx.lineTo(lm[b].x * W, lm[b].y * H); }); octx.stroke();
+    octx.fillStyle = '#e6edf5'; lm.forEach(p => { octx.beginPath(); octx.arc(p.x * W, p.y * H, 2.5, 0, 2 * PI); octx.fill(); });
+    octx.fillStyle = '#fbbf24'; [4, 8].forEach(i => { octx.beginPath(); octx.arc(lm[i].x * W, lm[i].y * H, 5, 0, 2 * PI); octx.fill(); });
+  });
+}
+
+/* ---- reticles ---- */
+const rets = [$('ret0'), $('ret1')];
+const REACH = 1.18;                                // slight amplification so screen edges are reachable
+const clamp = THREE.MathUtils.clamp;
+function handToNDC(s, out) { out.x = clamp((s.x - 0.5) * 2 * REACH, -1, 1); out.y = clamp(-(s.y - 0.5) * 2 * REACH, -1, 1); return out; }
+const ndc = new THREE.Vector2();
+function hideReticles() { rets.forEach(r => r.classList.remove('on', 'pinch')); }
+function updateReticles(n) {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  for (let i = 0; i < 2; i++) {
+    const r = rets[i];
+    if (i >= n) { r.classList.remove('on', 'pinch'); continue; }
+    handToNDC(slots[i], ndc);
+    r.style.transform = `translate(${(ndc.x + 1) / 2 * w}px,${(1 - ndc.y) / 2 * h}px)`;
+    r.classList.add('on'); r.classList.toggle('pinch', slots[i].pinched);
+  }
+}
+
+/* =====================================================================
+   GESTURE STATE MACHINE
+   G = null | {type:'drag'|'rotate'|'scale', ...}
+   ===================================================================== */
+let G = null, resume = null;
+const raycaster = new THREE.Raycaster(), tmpV = new THREE.Vector3(), tmpS = new THREE.Sphere();
+const wrapA = a => ((a + PI) % (2 * PI) + 2 * PI) % (2 * PI) - PI;
+const ROT_GAIN_X = 5.0, ROT_GAIN_Y = 4.0, ROLL_DEAD = 0.14, ROLL_GAIN = 1.0;
+
+function endGesture(lost) {
+  if (G && lost) resume = { type: G.type, until: performance.now() + 800 };
+  G = null;
+}
+function pickRobotByHand(s) {
+  handToNDC(s, ndc); raycaster.setFromCamera(ndc, camera);
+  if (raycaster.intersectObject(robotRoot, true).length) return true;
+  tmpS.set(robotRoot.position, modelR * robotRoot.scale.x * 1.05);        // forgiving fallback for thin limbs
+  return !!raycaster.ray.intersectSphere(tmpS, tmpV);
+}
+function startDrag(slot, s, now, skipHit) {
+  if (!skipHit && !pickRobotByHand(s)) return false;
+  handToNDC(s, ndc); raycaster.setFromCamera(ndc, camera);
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), T.pos);
+  const hp = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(plane, hp)) return false;
+  G = { type: 'drag', slot, plane, off: T.pos.clone().sub(hp) };      // anchor: robot keeps its offset from the grab point
+  return true;
+}
+function updateDrag(s) {
+  handToNDC(s, ndc); raycaster.setFromCamera(ndc, camera);
+  const hp = new THREE.Vector3();
+  if (raycaster.ray.intersectPlane(G.plane, hp)) { T.pos.copy(hp).add(G.off); clampPos(); }
+}
+function startRotate(slot, s) { G = { type: 'rotate', slot, lx: s.x, ly: s.y, a0: s.angle, prevEff: 0 }; }
+function updateRotate(s) {
+  let dx = s.x - G.lx, dy = s.y - G.ly; G.lx = s.x; G.ly = s.y;
+  if (Math.abs(dx) < 0.0005) dx = 0; if (Math.abs(dy) < 0.0005) dy = 0;
+  const tilt = wrapA(s.angle - G.a0);
+  const eff = Math.sign(tilt) * Math.max(0, Math.abs(tilt) - ROLL_DEAD);   // deliberate tilt only
+  const dRoll = -(eff - G.prevEff) * ROLL_GAIN; G.prevEff = eff;           // clockwise wrist tilt → clockwise roll
+  rotateBy(dx * ROT_GAIN_X, dy * ROT_GAIN_Y, dRoll);
+}
+const pairDist = () => { const a = slots[0], b = slots[1], asp = video.videoWidth / video.videoHeight || 4 / 3; return Math.hypot((a.x - b.x) * asp, a.y - b.y); };
+function startScale(now) { const fd = new OneEuro(1.2, 3); const d = fd.filter(pairDist(), now); G = { type: 'scale', fd, d0: Math.max(d, 0.04), s0: T.scale }; }
+function updateScale(now) { const d = G.fd.filter(pairDist(), now); T.scale = clamp(G.s0 * d / G.d0, SCALE_MIN, SCALE_MAX); }
+
+function updateGestures(now) {
+  const n = handCount;
+  if (mode === 'scale') {
+    if (G && G.type !== 'scale') endGesture(false);
+    const both = n === 2 && slots[0].pinched && slots[1].pinched;
+    if (both) { if (!G) startScale(now); else updateScale(now); }
+    else if (G) endGesture(false);
+    return;
+  }
+  if (G && G.type !== mode) endGesture(false);
+  if (G) {
+    const s = slots[G.slot];
+    if (G.slot < n && s.pinched) { mode === 'drag' ? updateDrag(s) : updateRotate(s); }
+    else endGesture(false);
+    return;
+  }
+  for (let i = 0; i < n; i++) {
+    const s = slots[i];
+    if (!s.pinched || s.blocked) continue;
+    const skip = resume && resume.type === mode && now < resume.until;
+    if (mode === 'drag') { if (!startDrag(i, s, now, skip)) { s.blocked = true; continue; } }   // pinch that started off-robot can't "slide onto" it
+    else startRotate(i, s);
+    resume = null; break;
+  }
+}
+
+function handleResults(res, now) {
+  const asp = video.videoWidth / video.videoHeight || 4 / 3;
+  const all = res.landmarks || [];
+  const raw = all.map(lm => {
+    const th = lm[4], ix = lm[8];
+    const palm = (d2(lm[0], lm[9], asp) + d2(lm[5], lm[17], asp)) / 2;
+    return { px: 1 - (th.x + ix.x) / 2, py: (th.y + ix.y) / 2,
+      ratio: d2(th, ix, asp) / Math.max(palm, 1e-4),
+      angle: Math.atan2((lm[0].x - lm[9].x) * asp, lm[0].y - lm[9].y) };
+  }).sort((a, b) => a.px - b.px);
+  drawOverlay(all);
+  const n = Math.min(raw.length, 2);
+  if (n !== handCount) {                                  // hand appeared / vanished → re-initialise, never jump
+    resetSlots(); endGesture(true); handCount = n;
+  }
+  for (let i = 0; i < n; i++) {
+    const s = slots[i], h = raw[i];
+    s.x = s.fx.filter(h.px, now); s.y = s.fy.filter(h.py, now);
+    s.ratio = s.fr.filter(h.ratio, now); s.angle = s.fa.filter(h.angle, now);
+    updatePinch(s);
+  }
+  setStatus(n ? 'tracking' : 'none', n);
+  updateReticles(n);
+  updateGestures(now);
+}
+
+/* =====================================================================
+   MOUSE / TOUCH FALLBACK  (supplementary, does not replace hand tracking)
+   ===================================================================== */
+let P = null;
+function ptrNDC(e) { const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' && !e.isPrimary) return;
+  ptrNDC(e); raycaster.setFromCamera(ndc, camera);
+  const hit = robotRoot.children.length && raycaster.intersectObject(robotRoot, true).length > 0;
+  if (!hit || mode === 'scale') { controls.enabled = true; return; }
+  controls.enabled = false;
+  canvas.setPointerCapture(e.pointerId);
+  P = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  if (mode === 'drag') {
+    P.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), T.pos);
+    const hp = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(P.plane, hp)) P.off = T.pos.clone().sub(hp); else P = null;
+  }
+}, true);
+canvas.addEventListener('pointermove', e => {
+  if (!P || e.pointerId !== P.id) return;
+  if (mode === 'drag') {
+    ptrNDC(e); raycaster.setFromCamera(ndc, camera);
+    const hp = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(P.plane, hp)) { T.pos.copy(hp).add(P.off); clampPos(); }
+  } else if (mode === 'rotate') {
+    rotateBy((e.clientX - P.x) * 0.008, (e.clientY - P.y) * 0.008, 0); P.x = e.clientX; P.y = e.clientY;
+  }
+});
+const endPtr = e => { if (P && e.pointerId === P.id) P = null; controls.enabled = true; };
+canvas.addEventListener('pointerup', endPtr); canvas.addEventListener('pointercancel', endPtr);
+canvas.addEventListener('wheel', e => {
+  if (mode !== 'scale') return;
+  e.preventDefault();
+  T.scale = clamp(T.scale * Math.exp(-e.deltaY * 0.0012), SCALE_MIN, SCALE_MAX);
+}, { passive: false });
+
+/* =====================================================================
+   MAIN LOOP  (single rAF loop: tracking + render)
+   ===================================================================== */
+let last = performance.now(), trackErrors = 0;
+function frame() {
+  requestAnimationFrame(frame);
+  const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1); last = now;
+  if (camOn && landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    try { handleResults(landmarker.detectForVideo(video, now), now); trackErrors = 0; }
+    catch (e) { if (++trackErrors === 1) console.warn('Hand tracking frame failed', e); if (trackErrors > 30) { showError('Hand tracking stopped unexpectedly. Press Stop Camera, then Start Camera.'); setStatus('error'); stopCamera(); } }
+  }
+  stepCamTween(now);
+  smoothRobot(dt);
+  controls.update();
+  renderer.render(scene, camera);
+}
+loadModel('humanoid');
+frame();
+</script>
+</body>
+</html>
